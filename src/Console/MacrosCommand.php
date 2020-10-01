@@ -3,6 +3,7 @@
 namespace Tutorigo\LaravelMacroHelper\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 
 class MacrosCommand extends Command
 {
@@ -65,15 +66,15 @@ class MacrosCommand extends Command
         $this->writeLine("<?php");
 
         foreach ($classes as $class) {
-            if (!class_exists($class)) {
+            if (! class_exists($class)) {
                 continue;
             }
 
             $reflection = new \ReflectionClass($class);
             $propertyName = 'macros';
-            if (!$reflection->hasProperty($propertyName)) {
+            if (! $reflection->hasProperty($propertyName)) {
                 $propertyName = 'globalMacros';
-                if (!$reflection->hasProperty($propertyName)) {
+                if (! $reflection->hasProperty($propertyName)) {
                     continue;
                 }
             }
@@ -82,7 +83,7 @@ class MacrosCommand extends Command
             $property->setAccessible(true);
             $macros = $property->getValue();
 
-            if (!$macros) {
+            if (! $macros) {
                 continue;
             }
 
@@ -92,7 +93,7 @@ class MacrosCommand extends Command
                         if (is_array($macro)) {
                             list($class, $method) = $macro;
                             $function = new \ReflectionMethod(is_object($class) ? get_class($class) : $class, $method);
-                        } else if ($macro instanceof \Closure) {
+                        } elseif ($macro instanceof \Closure) {
                             $function = new \ReflectionFunction($macro);
                         } else {
                             $function = new \ReflectionMethod(is_object($macro) ? get_class($macro) : $class, '__invoke');
@@ -102,12 +103,16 @@ class MacrosCommand extends Command
                             $this->writeLine($comment, $this->indent);
 
                             if (strpos($comment, '@instantiated') !== false) {
-                                $this->generateFunction($name, $function->getParameters(), "public", $function->getReturnType());
+                                $this->generateFunction($name, $function->getParameters(), "public", $function->getReturnType(), function () use ($function) {
+                                    $this->write('// @see: ' . $this->getFileName($function) . ':' . $function->getStartLine(), $this->indent);
+                                });
                                 continue;
                             }
                         }
 
-                        $this->generateFunction($name, $function->getParameters(), "public static", $function->getReturnType());
+                        $this->generateFunction($name, $function->getParameters(), "public static", $function->getReturnType(), function () use ($function) {
+                            $this->write('// @see: ' . $this->getFileName($function) . ':' . $function->getStartLine(), $this->indent);
+                        });
                     }
                 });
             });
@@ -119,8 +124,8 @@ class MacrosCommand extends Command
     }
 
     /**
-     * @param string $name
-     * @param null|Callable $callback
+     * @param  string $name
+     * @param  null|Callable $callback
      */
     protected function generateNamespace($name, $callback = null)
     {
@@ -136,8 +141,8 @@ class MacrosCommand extends Command
     }
 
     /**
-     * @param string $name
-     * @param null|Callable $callback
+     * @param  string $name
+     * @param  null|Callable $callback
      */
     protected function generateClass($name, $callback = null)
     {
@@ -153,11 +158,12 @@ class MacrosCommand extends Command
     }
 
     /**
-     * @param string $name
-     * @param \ReflectionParameter[] $parameters
-     * @param string $type
-     * @param null|string $returnType
-     * @param null|Callable $callback
+     * @param  string $name
+     * @param  \ReflectionParameter[] $parameters
+     * @param  string $type
+     * @param  null|string $returnType
+     * @param  null|Callable $callback
+     *
      * @throws \ReflectionException
      */
     protected function generateFunction($name, $parameters, $type = '', $returnType = null, $callback = null)
@@ -189,7 +195,7 @@ class MacrosCommand extends Command
             }
 
             $this->write("$" . $parameter->getName());
-            if ($parameter->isOptional() && !$parameter->isVariadic()) {
+            if ($parameter->isOptional() && ! $parameter->isVariadic()) {
                 $this->write(" = " . var_export($parameter->getDefaultValue(), true));
             }
 
@@ -218,11 +224,31 @@ class MacrosCommand extends Command
         $this->writeLine(" {");
 
         if ($callback) {
+            $this->indent++;
             $callback();
+            $this->indent--;
         }
 
         $this->writeLine();
         $this->writeLine("}", $this->indent);
+    }
+
+    /**
+     * @param  \ReflectionMethod|\ReflectionFunction $function
+     *
+     * @return string
+     */
+    protected function getFileName($function)
+    {
+        if (Str::contains($function->getFileName(), 'vendor')) {
+            return 'vendor' . Str::after($function->getFileName(), 'vendor');
+        }
+
+        if (Str::contains($function->getFileName(), 'app')) {
+            return 'app' . Str::after($function->getFileName(), 'app');
+        }
+
+        return $function->getFileName();
     }
 
     protected function write($string, $indent = 0)
